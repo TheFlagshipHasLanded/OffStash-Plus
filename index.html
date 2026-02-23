@@ -714,17 +714,54 @@
       width: 100%;
       max-width: 680px;
       margin: 0 auto;
-      height: auto;
-      max-height: 95vh;
+      height: 88vh;
+      max-height: 88vh;
       display: none;
       flex-direction: column;
       overflow: hidden;
+      box-sizing: border-box;
     }
     .overlay.show + .modal,
     .modal.show {
       display: flex;
     }
     /* Desktop: centered dialog */
+    /* Mobile modal — centered floating box */
+    @media (max-width: 699px) {
+      .modal {
+        top: calc(50% + 30px);
+        bottom: auto;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        border-radius: 16px;
+        border: 1px solid var(--border2);
+        height: auto;
+        max-height: calc(82vh - 60px);
+        width: calc(100% - 32px);
+        max-width: 480px;
+        padding-bottom: 0;
+      }
+      /* Single column form on mobile */
+      .form-desktop-cols {
+        display: flex !important;
+        flex-direction: column !important;
+        grid-template-columns: unset !important;
+      }
+      .form-col:last-child { order: 2; }
+      .form-col:first-child { order: 1; }
+      /* Smaller textarea on mobile */
+      #f-content {
+        height: 70px !important;
+        min-height: 70px !important;
+        flex: none !important;
+      }
+      /* Tighter form groups on mobile */
+      .form-group { margin-bottom: 5px !important; }
+      .modal-inner { padding: 0 16px 8px !important; }
+      /* Hide drag handle on centered modal */
+      .modal-handle { display: none; }
+    }
+
     @media (min-width: 700px) {
       .modal {
         top: 50%;
@@ -744,7 +781,9 @@
       overflow-x: hidden;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
-      padding: 0 20px 8px;
+      padding: 0 20px 20px;
+      flex: 1;
+      min-height: 0;
     }
     .modal-header {
       padding: 6px 20px 4px;
@@ -807,6 +846,8 @@
       display: flex;
       gap: 10px;
       margin-top: 6px;
+      padding-bottom: 8px;
+      flex-shrink: 0;
     }
 
     .btn-save {
@@ -1162,11 +1203,11 @@
         </div>
       </div>
     </div>
-    <div class="modal-actions">
-      <button class="btn-cancel" id="form-cancel">Cancel</button>
-      <button class="btn-danger" id="form-delete" style="display:none">Delete</button>
-      <button class="btn-save" id="form-save">Save Entry</button>
-    </div>
+  </div>
+  <div class="modal-actions" style="padding:8px 20px 12px;flex-shrink:0;">
+    <button class="btn-cancel" id="form-cancel">Cancel</button>
+    <button class="btn-danger" id="form-delete" style="display:none">Delete</button>
+    <button class="btn-save" id="form-save">Save Entry</button>
   </div>
 </div>
 
