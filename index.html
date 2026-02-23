@@ -1294,8 +1294,8 @@
       .tabs-desktop { display: flex; }
     }
     @media (max-width: 699px) {
-      .tabs-mobile { display: flex; }
-      .tabs-desktop { display: none; }
+      .tabs-mobile { display: none; }
+      .tabs-desktop { display: flex; }
     }
     @media (min-width: 900px) {
       .grid.layout-normal { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
@@ -1906,6 +1906,29 @@ function renderGrid() {
   if (entries.length === 0 && folders.length === 0) {
     grid.innerHTML = '';
     empty.style.display = 'block';
+    const isFiltered = searchQuery || activeTab !== 'all' || activeFolder;
+    const iconEl = document.getElementById('empty-icon');
+    const titleEl = document.getElementById('empty-title');
+    const subEl = empty.querySelector('.empty-sub');
+    const hintEl = empty.querySelector('.empty-drop-hint');
+    const dropZone = document.getElementById('empty-drop-zone');
+    if (isFiltered) {
+      iconEl.textContent = '🔍';
+      titleEl.textContent = searchQuery ? `No results for "${searchQuery}"` : 'Nothing in this category yet';
+      subEl.innerHTML = searchQuery
+        ? `Try a different search term, or <button onclick="event.stopPropagation();document.getElementById('search').value='';searchQuery='';renderGrid();" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font-size:inherit;text-decoration:underline;">clear the search</button>`
+        : 'Add an entry to this category or switch to another';
+      hintEl.style.display = 'none';
+      dropZone.style.borderStyle = 'solid';
+      dropZone.style.borderColor = 'var(--border)';
+    } else {
+      iconEl.textContent = '◻';
+      titleEl.textContent = 'Stash is empty';
+      subEl.innerHTML = 'Tap <strong>+ Add</strong> to create an entry, or<br/>drop files here to import them';
+      hintEl.style.display = '';
+      dropZone.style.borderStyle = '';
+      dropZone.style.borderColor = '';
+    }
     return;
   }
   empty.style.display = 'none';
@@ -3039,7 +3062,11 @@ document.getElementById('import-files-save').addEventListener('click', doImportF
 // ============================
 const emptyZone = document.getElementById('empty-drop-zone');
 
-emptyZone.addEventListener('click', () => {
+emptyZone.addEventListener('click', (e) => {
+  // Don't trigger if clicking a link inside the empty state (e.g. "clear the search")
+  if (e.target.tagName === 'A') return;
+  // Only open file picker when stash is truly empty, not when filtered/searched
+  if (searchQuery || activeTab !== 'all' || activeFolder) return;
   document.getElementById('import-files-input').click();
 });
 
@@ -3097,6 +3124,15 @@ document.getElementById('search').addEventListener('input', e => {
   renderGrid();
 });
 
+function updateSearchPlaceholder() {
+  const input = document.getElementById('search');
+  if (activeTab === 'all') {
+    input.placeholder = 'Search all categories…';
+  } else {
+    input.placeholder = `Search in ${CAT_LABELS[activeTab] || activeTab}…`;
+  }
+}
+
 // Mobile pill tabs
 document.getElementById('tabs').addEventListener('click', e => {
   const btn = e.target.closest('.tab');
@@ -3107,6 +3143,7 @@ document.getElementById('tabs').addEventListener('click', e => {
   activeFolder = null;
   const dd = document.getElementById('cat-dropdown');
   if (dd) dd.value = activeTab;
+  updateSearchPlaceholder();
   renderGrid();
 });
 
@@ -3117,6 +3154,7 @@ document.getElementById('cat-dropdown').addEventListener('change', e => {
   document.querySelectorAll('.tab').forEach(t => {
     t.classList.toggle('active', t.dataset.cat === activeTab);
   });
+  updateSearchPlaceholder();
   renderGrid();
 });
 
@@ -3531,6 +3569,7 @@ async function init() {
   await openDB();
   loadFolders();
   allEntries = await dbAll();
+  updateSearchPlaceholder();
   renderGrid();
   renderFolderRow();
   updateOnlineStatus();
