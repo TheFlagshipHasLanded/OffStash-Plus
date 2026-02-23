@@ -48,11 +48,11 @@
     /* ADD MENU */
     .add-menu-wrap { position: relative; }
     .add-menu {
-      position: absolute; top: calc(100% + 6px); right: 0;
+      position: fixed; top: auto; right: 12px;
       background: var(--bg2); border: 1px solid var(--border2);
       border-radius: var(--radius); overflow: hidden;
-      min-width: 160px; z-index: 300;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      min-width: 180px; z-index: 9999;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.8);
     }
     .add-menu-item {
       display: block; width: 100%; background: none; border: none;
@@ -2421,7 +2421,16 @@ document.getElementById('folder-pills').addEventListener('click', e => {
 document.getElementById('add-btn').addEventListener('click', (e) => {
   e.stopPropagation();
   const menu = document.getElementById('add-menu');
-  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+  const btn = document.getElementById('add-btn');
+  const rect = btn.getBoundingClientRect();
+  if (menu.style.display === 'none') {
+    menu.style.display = 'block';
+    // Position fixed relative to button
+    menu.style.top = (rect.bottom + 6) + 'px';
+    menu.style.right = (window.innerWidth - rect.right) + 'px';
+  } else {
+    menu.style.display = 'none';
+  }
 });
 document.addEventListener('click', () => {
   document.getElementById('add-menu').style.display = 'none';
