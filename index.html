@@ -188,11 +188,11 @@
       position: sticky;
       top: 0;
       background: var(--bg);
-      z-index: 100;
+      z-index: 9998;
       gap: 12px;
       width: 100%;
       box-sizing: border-box;
-      overflow: hidden;
+      overflow: visible;
     }
 
     .logo {
@@ -319,6 +319,8 @@
       box-sizing: border-box;
       width: 100%;
       overflow: hidden;
+      position: relative;
+      z-index: 1;
     }
 
     /* Mobile pill tabs */
@@ -2425,9 +2427,17 @@ document.getElementById('add-btn').addEventListener('click', (e) => {
   const rect = btn.getBoundingClientRect();
   if (menu.style.display === 'none') {
     menu.style.display = 'block';
-    // Position fixed relative to button
-    menu.style.top = (rect.bottom + 6) + 'px';
+    // Position below button, aligned to right edge
+    const menuHeight = menu.offsetHeight || 90;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    // If not enough space below, flip above
+    if (spaceBelow < menuHeight + 10) {
+      menu.style.top = (rect.top - menuHeight - 6) + 'px';
+    } else {
+      menu.style.top = (rect.bottom + 6) + 'px';
+    }
     menu.style.right = (window.innerWidth - rect.right) + 'px';
+    menu.style.left = 'auto';
   } else {
     menu.style.display = 'none';
   }
