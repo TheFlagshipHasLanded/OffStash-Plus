@@ -41,6 +41,8 @@
       min-height: 100vh;
       -webkit-font-smoothing: antialiased;
       overscroll-behavior: none;
+      overflow-x: hidden;
+      max-width: 100vw;
     }
 
     /* ADD MENU */
@@ -188,6 +190,9 @@
       background: var(--bg);
       z-index: 100;
       gap: 12px;
+      width: 100%;
+      box-sizing: border-box;
+      overflow: hidden;
     }
 
     .logo {
@@ -215,6 +220,7 @@
       display: flex;
       gap: 8px;
       align-items: center;
+      flex-shrink: 0;
     }
 
     .icon-btn {
@@ -239,7 +245,19 @@
     .icon-btn:active { transform: scale(0.95); }
     .icon-btn .btn-icon { font-size: 14px; }
     /* Hide labels on very small screens */
-    @media (max-width: 380px) { .icon-btn .btn-label { display: none; } .icon-btn { padding: 0; width: 36px; } }
+    /* Mobile header — hide labels, shrink buttons */
+    @media (max-width: 699px) {
+      .icon-btn .btn-label { display: none; }
+      .icon-btn { padding: 0; width: 34px; height: 34px; }
+      .btn-add { padding: 0 10px; height: 34px; font-size: 12px; }
+      .header-actions { gap: 5px; }
+      header { padding: 10px 12px; }
+    }
+    @media (max-width: 380px) {
+      .icon-btn { width: 30px; height: 30px; }
+      .btn-add { padding: 0 8px; font-size: 11px; }
+      .header-actions { gap: 4px; }
+    }
 
     .btn-add {
       background: var(--accent);
@@ -298,6 +316,9 @@
     .tabs-wrap {
       padding: 12px 20px;
       border-bottom: 1px solid var(--border);
+      box-sizing: border-box;
+      width: 100%;
+      overflow: hidden;
     }
 
     /* Mobile pill tabs */
@@ -538,6 +559,9 @@
     /* CONTENT */
     .content {
       padding: 16px 20px;
+      box-sizing: border-box;
+      width: 100%;
+      overflow-x: hidden;
     }
 
     /* STATS BAR */
@@ -647,8 +671,11 @@
     /* EMPTY STATE */
     .empty {
       text-align: center;
-      padding: 60px 20px;
+      padding: 40px 16px;
       color: var(--text3);
+      box-sizing: border-box;
+      width: 100%;
+      overflow: hidden;
     }
     .empty-icon { font-size: 40px; margin-bottom: 12px; }
     .empty-title {
