@@ -2475,8 +2475,19 @@ async function init() {
   // Register service worker
   if ('serviceWorker' in navigator) {
     try {
-      await navigator.serviceWorker.register('sw.js');
+      const reg = await navigator.serviceWorker.register('sw.js');
       console.log('[OffStash] SW registered');
+      // Listen for updates from new SW and reload to get fresh version
+      navigator.serviceWorker.addEventListener('message', e => {
+        if (e.data?.type === 'SW_UPDATED') {
+          console.log('[OffStash] New version available, reloading…');
+          window.location.reload();
+        }
+      });
+      // Check for updates every time app is focused
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update();
+      });
     } catch(e) {
       console.warn('[OffStash] SW registration failed', e);
     }
