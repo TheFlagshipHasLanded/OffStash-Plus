@@ -1978,7 +1978,10 @@ function renderGrid() {
 // HOVER PREVIEW
 // ============================
 let _hoverTimer = null;
+const _isTouchDevice = () => window.matchMedia('(hover: none)').matches;
+
 function showHoverPreview(event, id) {
+  if (_isTouchDevice()) return;
   clearTimeout(_hoverTimer);
   _hoverTimer = setTimeout(() => {
     const e = allEntries.find(x => x.id === id);
@@ -2081,6 +2084,7 @@ function showHoverPreview(event, id) {
   }, 350);
 }
 function hideHoverPreview() {
+  if (_isTouchDevice()) return;
   clearTimeout(_hoverTimer);
   document.getElementById('hover-preview').classList.remove('show');
 }
@@ -2569,6 +2573,9 @@ function closeFormModal() {
 }
 
 function openView(id) {
+  // Always dismiss hover preview when opening an entry
+  clearTimeout(_hoverTimer);
+  document.getElementById('hover-preview').classList.remove('show');
   const e = allEntries.find(x => x.id === id);
   if (!e) return;
   viewingId = id;
