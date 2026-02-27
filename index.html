@@ -1632,7 +1632,7 @@
     <button class="btn-cancel" id="viewer-close" style="flex-shrink:0;">✕ Close</button>
   </div>
   <div class="modal-inner" style="padding:0 12px 12px;display:flex;flex-direction:column;">
-    <div id="viewer-body" style="flex:1;min-height:0;border-radius:6px;background:#000;display:flex;align-items:center;justify-content:center;overflow:auto;height:100%;"></div>
+    <div id="viewer-body" style="flex:1;min-height:0;border-radius:6px;background:#000;display:flex;align-items:center;justify-content:center;overflow:auto;height:100%;user-select:none;-webkit-user-select:none;"></div>
   </div>
 </div>
 
@@ -2267,6 +2267,15 @@ function formatBytes(bytes) {
 
 // ── HTML viewer toggle state ──────────────────────────────
 let _viewerHtmlSource = null; // stores decoded HTML string when viewing an HTML file
+// ── Active audio stash (persists across viewer opens) ──────
+let _activeAudio = null; // the live audio element
+let _activeAudioData = null; // original data uri
+let _activeAudioType = null;
+let _activeAudioName = null;
+
+// Image viewer cursor SVGs
+const _cursorFill = 'url("data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect x="2" y="2" width="28" height="28" rx="3" fill="#c8ff00" opacity="0.9"/><rect x="8" y="8" width="16" height="16" rx="2" fill="none" stroke="#111" stroke-width="2"/></svg>') + '") 16 16, pointer';
+const _cursorFit  = 'url("data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect x="4" y="4" width="24" height="24" rx="3" fill="none" stroke="#c8ff00" stroke-width="2"/><rect x="10" y="10" width="12" height="12" rx="2" fill="#c8ff00" opacity="0.9"/></svg>') + '") 16 16, pointer';
 
 function _setImageViewMode(mode) {
   const img = document.getElementById('viewer-img');
@@ -2275,13 +2284,13 @@ function _setImageViewMode(mode) {
   const previewBtn = document.getElementById('viewer-preview-btn');
   if (!img) return;
   if (mode === 'fill') {
-    img.style.cssText = 'width:100%;height:100%;object-fit:contain;border-radius:4px;display:block;transition:all 0.2s;cursor:zoom-out;image-rendering:auto;';
-    body.style.cursor = 'zoom-out';
+    img.style.cssText = 'width:100%;height:100%;object-fit:fill;border-radius:4px;display:block;image-rendering:auto;';
+    body.style.cursor = _cursorFit;
     codeBtn.classList.remove('active');
     previewBtn.classList.add('active');
   } else {
-    img.style.cssText = 'max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;border-radius:4px;display:block;transition:all 0.2s;cursor:zoom-in;';
-    body.style.cursor = 'zoom-in';
+    img.style.cssText = 'max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;border-radius:4px;display:block;transition:all 0.2s;';
+    body.style.cursor = _cursorFill;
     codeBtn.classList.add('active');
     previewBtn.classList.remove('active');
   }
@@ -2345,6 +2354,17 @@ function saveAttachmentByIndex(i) {
 function _showViewer(data, type, name) {
   const body = document.getElementById('viewer-body');
   document.getElementById('viewer-filename').textContent = name || 'File';
+
+  // If there's a live audio player, pause it before destroying
+  if (_activeAudio) { _activeAudio.pause(); _activeAudio = null; }
+  // Always remove stale mini pill — fresh session builds a new one
+  const _oldPill = document.getElementById('audio-mini-pill');
+  if (_oldPill) _oldPill.remove();
+  // Stash audio data if this is an audio file so mini pill can restore it
+  if (type && type.startsWith('audio/')) {
+    _activeAudioData = data; _activeAudioType = type; _activeAudioName = name;
+  }
+
   body.innerHTML = '';
   _viewerHtmlSource = null;
 
@@ -2367,7 +2387,7 @@ function _showViewer(data, type, name) {
 
   if (type.startsWith('image/')) {
     body.style.background = '#000';
-    body.style.cursor = 'zoom-in';
+    body.style.cursor = _cursorFill;
     // Show image fit/fill toggle in header
     const toggleBar = document.getElementById('viewer-toggle-bar');
     toggleBar.classList.add('show');
@@ -2380,8 +2400,10 @@ function _showViewer(data, type, name) {
     img.alt = name || 'Image';
     img.id = 'viewer-img';
     img.style.cssText = 'max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;border-radius:4px;display:block;transition:all 0.2s;';
-    img.onclick = () => {
-      const isFill = img.style.width === '100%';
+    // Clicking anywhere in the viewer (image or black area) toggles fit/fill
+    body.onclick = () => {
+      const previewBtn = document.getElementById('viewer-preview-btn');
+      const isFill = previewBtn.classList.contains('active');
       _setImageViewMode(isFill ? 'fit' : 'fill');
     };
     body.appendChild(img);
@@ -2454,23 +2476,521 @@ function _showViewer(data, type, name) {
     body.appendChild(video);
 
   } else if (type.startsWith('audio/')) {
-    body.style.background = 'var(--bg2)';
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;width:100%;gap:24px;padding:32px;box-sizing:border-box;';
-    const icon = document.createElement('div');
-    icon.textContent = '🎵';
-    icon.style.cssText = 'font-size:64px;line-height:1;';
-    const trackName = document.createElement('div');
-    trackName.textContent = name || 'Audio File';
-    trackName.style.cssText = 'font-family:var(--sans);font-size:16px;font-weight:600;color:var(--text);text-align:center;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    body.style.background = 'radial-gradient(ellipse at 40% 30%, #1a1a2e 0%, #0d0d14 50%, #080808 100%)';
+    body.style.overflow = 'hidden';
+    body.style.padding = '0';
+
     const audio = document.createElement('audio');
     audio.src = data;
-    audio.controls = true;
-    audio.style.cssText = 'width:100%;max-width:500px;';
-    wrap.appendChild(icon);
-    wrap.appendChild(trackName);
-    wrap.appendChild(audio);
-    body.appendChild(wrap);
+    audio.crossOrigin = 'anonymous';
+    _activeAudio = audio; // stash so _showViewer can pause it
+
+    // Web Audio API
+    let audioCtx = null, analyser = null, rafId = null;
+    function initAudioCtx() {
+      if (audioCtx) return;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 128;
+      analyser.smoothingTimeConstant = 0.8;
+      const source = audioCtx.createMediaElementSource(audio);
+      source.connect(analyser);
+      analyser.connect(audioCtx.destination);
+    }
+
+    const fmt = s => { if(isNaN(s))return'0:00'; const m=Math.floor(s/60),sec=Math.floor(s%60); return m+':'+(sec<10?'0':'')+sec; };
+
+    // Build the retro player shell
+    // Outer wrapper fills the body
+    const outerWrap = document.createElement('div');
+    outerWrap.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);box-sizing:border-box;';
+
+    // Device shell — the retro hardware body
+    const device = document.createElement('div');
+    device.style.cssText = `
+      display:flex;flex-direction:column;align-items:center;gap:14px;
+      background:linear-gradient(160deg,#2a2a2a 0%,#1a1a1a 40%,#111 100%);
+      border:1px solid #3a3a3a;border-radius:18px;
+      padding:24px 28px 28px;box-sizing:border-box;
+      box-shadow:
+        0 0 0 1px #000,
+        0 2px 0 0 #444 inset,
+        0 -1px 0 0 #111 inset,
+        4px 0 8px rgba(0,0,0,0.6),
+        -4px 0 8px rgba(0,0,0,0.6),
+        0 20px 60px rgba(0,0,0,0.8),
+        0 0 40px rgba(200,255,0,0.04);
+      min-width:340px;max-width:500px;width:90%;
+      position:relative;
+    `;
+
+    // Top brand bar
+    const brandBar = document.createElement('div');
+    brandBar.style.cssText = 'width:100%;display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:1px solid #222;';
+    const brandName = document.createElement('span');
+    brandName.textContent = 'OFFSTASH+';
+    brandName.style.cssText = 'font-size:9px;letter-spacing:0.3em;color:#444;font-weight:700;';
+    const brandDot = document.createElement('div');
+    brandDot.id = 'brand-dot';
+    brandDot.style.cssText = 'width:7px;height:7px;border-radius:50%;background:#333;box-shadow:none;transition:all 0.3s;';
+    brandBar.appendChild(brandName); brandBar.appendChild(brandDot);
+    device.appendChild(brandBar);
+
+    // LED dot pulses when playing
+    // (wired below after audio events)
+
+    const player = device; // player is the device shell
+    outerWrap.appendChild(device);
+
+    // ── LCD DISPLAY ──
+    const lcd = document.createElement('div');
+    lcd.style.cssText = `
+      width:100%;max-width:480px;background:#0d1a00;border:2px solid #1a2e00;border-radius:6px;
+      padding:14px 16px;box-sizing:border-box;position:relative;overflow:hidden;
+      box-shadow:0 0 20px rgba(200,255,0,0.08) inset, 0 0 0 1px rgba(200,255,0,0.06);
+    `;
+    // scanlines
+    lcd.innerHTML = `<div style="position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.18) 2px,rgba(0,0,0,0.18) 4px);pointer-events:none;z-index:1;border-radius:4px;"></div>`;
+
+    // Track marquee
+    const marqueeWrap = document.createElement('div');
+    marqueeWrap.style.cssText = 'overflow:hidden;white-space:nowrap;position:relative;z-index:2;margin-bottom:10px;';
+    const marqueeInner = document.createElement('div');
+    marqueeInner.style.cssText = 'display:inline-block;font-size:13px;color:#c8ff00;letter-spacing:0.08em;text-shadow:0 0 8px rgba(200,255,0,0.6);';
+    marqueeInner.textContent = (name || 'AUDIO FILE').toUpperCase();
+    marqueeWrap.appendChild(marqueeInner);
+    lcd.appendChild(marqueeWrap);
+
+    // Animate marquee if text overflows
+    setTimeout(() => {
+      if (marqueeInner.scrollWidth > marqueeWrap.clientWidth) {
+        marqueeInner.style.animation = 'none';
+        const dist = marqueeInner.scrollWidth - marqueeWrap.clientWidth + 40;
+        marqueeInner.animate([
+          {transform:'translateX(0)'},{transform:`translateX(-${dist}px)`},
+          {transform:`translateX(-${dist}px)`},{transform:'translateX(0)'}
+        ], {duration: dist * 60 + 2000, iterations: Infinity, easing:'linear'});
+      }
+    }, 100);
+
+    // Time display row
+    const timeRow = document.createElement('div');
+    timeRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;position:relative;z-index:2;margin-bottom:10px;';
+    const timeEl = document.createElement('span');
+    timeEl.style.cssText = 'font-size:28px;color:#c8ff00;letter-spacing:0.12em;text-shadow:0 0 12px rgba(200,255,0,0.7);font-weight:700;';
+    timeEl.textContent = '0:00';
+    const durEl = document.createElement('span');
+    durEl.style.cssText = 'font-size:11px;color:rgba(200,255,0,0.45);letter-spacing:0.06em;align-self:flex-end;padding-bottom:4px;';
+    durEl.textContent = '/ 0:00';
+    const statusEl = document.createElement('span');
+    statusEl.style.cssText = 'font-size:10px;color:rgba(200,255,0,0.5);letter-spacing:0.14em;align-self:flex-end;padding-bottom:4px;';
+    statusEl.textContent = '■ STOP';
+    timeRow.appendChild(timeEl); timeRow.appendChild(statusEl); timeRow.appendChild(durEl);
+    lcd.appendChild(timeRow);
+
+    // Mini bar visualizer inside LCD
+    const vizCanvas = document.createElement('canvas');
+    vizCanvas.height = 32;
+    vizCanvas.style.cssText = 'width:100%;height:32px;display:block;position:relative;z-index:2;border-radius:2px;';
+    lcd.appendChild(vizCanvas);
+
+    player.appendChild(lcd);
+
+    // ── SCRUBBER ──
+    const scrubWrap = document.createElement('div');
+    scrubWrap.style.cssText = 'width:100%;max-width:480px;position:relative;';
+    const scrubTrack = document.createElement('div');
+    scrubTrack.style.cssText = 'width:100%;height:6px;background:#1a1a1a;border-radius:3px;cursor:pointer;position:relative;border:1px solid #222;overflow:visible;margin:6px 0;';
+    const scrubFill = document.createElement('div');
+    scrubFill.style.cssText = 'height:100%;width:0%;background:linear-gradient(90deg,#c8ff00,#aadd00);border-radius:3px;box-shadow:0 0 6px rgba(200,255,0,0.5);';
+    const scrubThumb = document.createElement('div');
+    scrubThumb.style.cssText = 'width:12px;height:12px;background:#c8ff00;border-radius:50%;position:absolute;top:50%;transform:translate(-50%,-50%);left:0%;cursor:pointer;box-shadow:0 0 8px rgba(200,255,0,0.8);';
+    scrubTrack.appendChild(scrubFill); scrubTrack.appendChild(scrubThumb);
+    scrubWrap.appendChild(scrubTrack);
+    player.appendChild(scrubWrap);
+
+    // Scrub interaction
+    // ── SCRUBBER INTERACTION (mouse + touch) ──
+    let scrubbing = false;
+    const getScrubPct = e => {
+      const r = scrubTrack.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      return Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    };
+    const setScrubVisual = pct => {
+      scrubFill.style.transition = 'none';
+      scrubThumb.style.transition = 'none';
+      scrubFill.style.width = (pct * 100) + '%';
+      scrubThumb.style.left = (pct * 100) + '%';
+    };
+    const startScrub = e => {
+      scrubbing = true;
+      setScrubVisual(getScrubPct(e));
+      e.preventDefault();
+    };
+    const moveScrub = e => {
+      if (!scrubbing) return;
+      setScrubVisual(getScrubPct(e));
+    };
+    const endScrub = e => {
+      if (!scrubbing) return;
+      scrubbing = false;
+      const pct = getScrubPct(e.changedTouches ? {clientX: e.changedTouches[0].clientX} : e);
+      if (!isNaN(audio.duration)) audio.currentTime = pct * audio.duration;
+      scrubFill.style.transition = 'width 0.1s';
+      scrubThumb.style.transition = 'left 0.1s';
+    };
+    scrubTrack.addEventListener('mousedown', startScrub);
+    scrubTrack.addEventListener('touchstart', startScrub, {passive:false});
+    window.addEventListener('mousemove', moveScrub);
+    window.addEventListener('touchmove', moveScrub, {passive:false});
+    window.addEventListener('mouseup', endScrub);
+    window.addEventListener('touchend', endScrub);
+
+    // ── CONTROLS ──
+    const mkBtn = (label, title, size='12px') => {
+      const b = document.createElement('button');
+      b.title = title;
+      b.innerHTML = label;
+      b.style.cssText = `
+        background:#111;border:1px solid #2a2a2a;color:#c8ff00;font-family:var(--mono);
+        font-size:${size};padding:7px 12px;border-radius:4px;cursor:pointer;
+        letter-spacing:0.06em;transition:all 0.15s;white-space:nowrap;
+        text-shadow:0 0 6px rgba(200,255,0,0.4);flex-shrink:0;
+      `;
+      b.onmouseenter = () => { b.style.background='#1a2800'; b.style.borderColor='#c8ff00'; b.style.boxShadow='0 0 8px rgba(200,255,0,0.2)'; };
+      b.onmouseleave = () => {
+        if (b._active) { b.style.background='#0d1a00'; b.style.borderColor='#c8ff00'; }
+        else { b.style.background='#111'; b.style.borderColor='#2a2a2a'; b.style.boxShadow=''; }
+      };
+      return b;
+    };
+
+    // Row 1: transport controls
+    const row1 = document.createElement('div');
+    row1.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;justify-content:center;';
+
+    const btnRew  = mkBtn('⏮ REW', 'Rewind 10s (←)');
+    const btnPlay = mkBtn('▶ PLAY', 'Play/Pause (Space)', '13px');
+    btnPlay.style.padding = '9px 0';
+    btnPlay.style.width = '110px';
+    btnPlay.style.textAlign = 'center';
+    btnPlay.style.background = '#0d1a00';
+    btnPlay.style.borderColor = '#3a5a00';
+    const btnFwd  = mkBtn('FF ⏭', 'Forward 10s (→)');
+
+    row1.appendChild(btnRew); row1.appendChild(btnPlay); row1.appendChild(btnFwd);
+
+    // Row 2: secondary controls + volume
+    const row2 = document.createElement('div');
+    row2.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;justify-content:space-between;';
+
+    // Loop toggle
+    let looping = false;
+    const btnLoop = mkBtn('⟳ LOOP', 'Toggle Loop (L)');
+    btnLoop.style.opacity = '0.4';
+    const setLoop = val => {
+      looping = val;
+      audio.loop = val;
+      btnLoop.style.opacity = val ? '1' : '0.4';
+      btnLoop.style.borderColor = val ? '#c8ff00' : '#2a2a2a';
+      btnLoop.style.boxShadow = val ? '0 0 8px rgba(200,255,0,0.3)' : '';
+      btnLoop._active = val;
+    };
+    btnLoop.onclick = () => setLoop(!looping);
+
+    // Mini mode button
+    const btnMini = mkBtn('⊟ MINI', 'Toggle Mini Player');
+    btnMini.onclick = () => {
+      if (!_activeAudioData) return; // no active session, do nothing
+      const pill = document.getElementById('audio-mini-pill');
+      if (!pill) return;
+      const isVisible = pill.dataset.visible === 'true';
+      if (isVisible) {
+        pill.dataset.visible = 'false';
+        pill.style.transform = 'translateX(-50%) translateY(80px)';
+      } else {
+        pill.dataset.visible = 'true';
+        pill.style.transform = 'translateX(-50%) translateY(0)';
+      }
+    };
+
+    // Volume
+    const volWrap = document.createElement('div');
+    volWrap.style.cssText = 'display:flex;align-items:center;gap:6px;flex:1;justify-content:flex-end;';
+    const volLbl = document.createElement('span');
+    volLbl.style.cssText = 'font-size:10px;color:rgba(200,255,0,0.5);letter-spacing:0.1em;';
+    volLbl.textContent = 'VOL';
+    const volSlider = document.createElement('input');
+    volSlider.type='range'; volSlider.min=0; volSlider.max=100; volSlider.value=100;
+    volSlider.style.cssText = 'width:80px;accent-color:#c8ff00;cursor:pointer;';
+    volWrap.appendChild(volLbl); volWrap.appendChild(volSlider);
+
+    row2.appendChild(btnLoop); row2.appendChild(btnMini); row2.appendChild(volWrap);
+
+    // Wrap both rows
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display:flex;flex-direction:column;gap:8px;width:100%;';
+    controls.appendChild(row1); controls.appendChild(row2);
+    player.appendChild(controls);
+    device.appendChild(audio);
+    body.appendChild(outerWrap);
+
+    // ── WIRE UP ──
+    const togglePlay = () => {
+      initAudioCtx();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      audio.paused ? audio.play() : audio.pause();
+    };
+    btnPlay.onclick = togglePlay;
+    // Tap = ±10s jump, hold = continuous scrub
+    const addHoldScrub = (btn, dir) => {
+      let holdTimer = null, holdInterval = null, pressing = false;
+
+      const startHold = e => {
+        pressing = true;
+        holdTimer = setTimeout(() => {
+          holdTimer = null;
+          holdInterval = setInterval(() => {
+            audio.currentTime = Math.max(0, Math.min(audio.duration||0, audio.currentTime + dir * 0.4));
+          }, 30);
+        }, 400);
+        e.preventDefault();
+      };
+      const endHold = () => {
+        if (!pressing) return; // already handled
+        pressing = false;
+        const wasHolding = holdInterval !== null;
+        clearTimeout(holdTimer);
+        clearInterval(holdInterval);
+        holdTimer = null; holdInterval = null;
+        if (!wasHolding) audio.currentTime = Math.max(0, Math.min(audio.duration||0, audio.currentTime + dir * 10));
+      };
+
+      btn.addEventListener('mousedown', startHold);
+      btn.addEventListener('touchstart', startHold, {passive:false});
+      btn.addEventListener('mouseup', endHold);
+      btn.addEventListener('mouseleave', () => { if (pressing) endHold(); });
+      btn.addEventListener('touchend', endHold);
+    };
+
+    addHoldScrub(btnRew, -1);
+    addHoldScrub(btnFwd, +1);
+    volSlider.oninput = () => { audio.volume = volSlider.value / 100; };
+
+    // Elapsed/remaining toggle — click the time display
+    let showRemaining = false;
+    timeEl.style.cursor = 'pointer';
+    timeEl.title = 'Click to toggle elapsed/remaining';
+    timeEl.onclick = () => { showRemaining = !showRemaining; };
+
+    audio.onplay = () => {
+      btnPlay.innerHTML = '⏸ PAUSE';
+      statusEl.textContent = '▶ PLAY';
+      statusEl.style.color = '#c8ff00';
+      statusEl.style.textShadow = '0 0 8px rgba(200,255,0,0.7)';
+      const dot = document.getElementById('brand-dot');
+      if (dot) { dot.style.background='#c8ff00'; dot.style.boxShadow='0 0 6px #c8ff00, 0 0 12px rgba(200,255,0,0.5)'; }
+    };
+    audio.onpause = () => {
+      btnPlay.innerHTML = '▶ PLAY';
+      statusEl.textContent = '■ STOP';
+      statusEl.style.color = 'rgba(200,255,0,0.5)';
+      statusEl.style.textShadow = '';
+      const dot = document.getElementById('brand-dot');
+      if (dot) { dot.style.background='#333'; dot.style.boxShadow='none'; }
+    };
+    audio.onended = () => {
+      if (!looping) {
+        btnPlay.innerHTML = '▶ PLAY';
+        statusEl.textContent = '■ END';
+      }
+    };
+    audio.onloadedmetadata = () => { durEl.textContent = '/ ' + fmt(audio.duration); };
+    audio.ontimeupdate = () => {
+      const cur = audio.currentTime, dur = audio.duration || 0;
+      if (showRemaining) {
+        const rem = dur - cur;
+        timeEl.textContent = '-' + fmt(rem);
+      } else {
+        timeEl.textContent = fmt(cur);
+      }
+      if (scrubbing) return;
+      const pct = dur ? (cur/dur)*100 : 0;
+      scrubFill.style.width = pct + '%';
+      scrubThumb.style.left = pct + '%';
+    };
+
+    // ── KEYBOARD SHORTCUTS ──
+    const _keyHandler = e => {
+      // Only fire if viewer modal is open and no input is focused
+      const modal = document.getElementById('viewer-modal');
+      if (!modal || !modal.classList.contains('show')) return;
+      if (['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) return;
+      if (e.key === ' ' || e.key === 'k') { e.preventDefault(); togglePlay(); }
+      else if (e.key === 'ArrowLeft')  { e.preventDefault(); audio.currentTime = Math.max(0, audio.currentTime - 10); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); audio.currentTime = Math.min(audio.duration||0, audio.currentTime + 10); }
+      else if (e.key === 'l' || e.key === 'L') { setLoop(!looping); }
+      else if (e.key === 'ArrowUp')   { e.preventDefault(); audio.volume = Math.min(1, audio.volume + 0.1); volSlider.value = audio.volume * 100; }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); audio.volume = Math.max(0, audio.volume - 0.1); volSlider.value = audio.volume * 100; }
+    };
+    document.addEventListener('keydown', _keyHandler);
+
+    // ── MINI MODE ──
+    // Reuse existing pill if already in DOM, otherwise create it
+    // Always remove stale pill and build fresh for each new audio session
+    const _oldMiniPill = document.getElementById('audio-mini-pill');
+    if (_oldMiniPill) _oldMiniPill.remove();
+
+    const miniPill = document.createElement('div');
+    miniPill.id = 'audio-mini-pill';
+    miniPill.dataset.visible = 'false';
+    miniPill.style.cssText = `
+      position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);
+      background:linear-gradient(135deg,#1a1a1a,#111);
+      border:1px solid #2a2a2a;border-radius:40px;
+      display:flex;align-items:center;gap:12px;
+      padding:10px 16px 10px 12px;
+      box-shadow:0 4px 24px rgba(0,0,0,0.7), 0 0 0 1px rgba(200,255,0,0.08);
+      cursor:pointer;z-index:9999;transition:transform 0.35s cubic-bezier(0.34,1.56,0.64,1);
+      font-family:var(--mono);user-select:none;min-width:220px;max-width:340px;
+    `;
+    const miniDot = document.createElement('div');
+    miniDot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:#333;flex-shrink:0;transition:all 0.3s;';
+    const miniInfo = document.createElement('div');
+    miniInfo.style.cssText = 'flex:1;overflow:hidden;';
+    const miniName = document.createElement('div');
+    miniName.style.cssText = 'font-size:10px;color:#c8ff00;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.06em;';
+    const miniTime = document.createElement('div');
+    miniTime.style.cssText = 'font-size:9px;color:rgba(200,255,0,0.45);margin-top:2px;letter-spacing:0.04em;';
+    miniTime.textContent = '0:00';
+    miniInfo.appendChild(miniName); miniInfo.appendChild(miniTime);
+    const miniPlayBtn = document.createElement('button');
+    miniPlayBtn.style.cssText = 'background:#0d1a00;border:1px solid #3a5a00;color:#c8ff00;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;';
+    miniPlayBtn.textContent = '▶';
+    const miniClose = document.createElement('button');
+    miniClose.style.cssText = 'background:none;border:none;color:rgba(200,255,0,0.3);cursor:pointer;font-size:12px;padding:0;flex-shrink:0;line-height:1;';
+    miniClose.textContent = '✕';
+    miniClose.title = 'Stop & dismiss';
+    miniPill.appendChild(miniDot); miniPill.appendChild(miniInfo);
+    miniPill.appendChild(miniPlayBtn); miniPill.appendChild(miniClose);
+    document.body.appendChild(miniPill);
+
+    // Update track name for this session
+    miniName.textContent = (name || 'AUDIO').toUpperCase();
+
+    const showMini = () => {
+      miniPill.dataset.visible = 'true';
+      miniPill.style.transform = 'translateX(-50%) translateY(0)';
+    };
+    const hideMini = () => {
+      miniPill.dataset.visible = 'false';
+      miniPill.style.transform = 'translateX(-50%) translateY(80px)';
+    };
+
+    const viewerModal = document.getElementById('viewer-modal');
+
+    // Play/pause button on pill
+    miniPlayBtn.onclick = e => {
+      e.stopPropagation();
+      initAudioCtx();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+      audio.paused ? audio.play() : audio.pause();
+    };
+    // Clicking pill body (not buttons) toggles main viewer open/closed
+    miniPill.onclick = () => {
+      const modal = document.getElementById('viewer-modal');
+      if (modal.classList.contains('show')) {
+        document.getElementById('viewer-overlay').classList.remove('show');
+        modal.classList.remove('show');
+      } else {
+        document.getElementById('viewer-overlay').classList.add('show');
+        modal.classList.add('show');
+      }
+    };
+    // ✕ on pill: just hides the pill. Only pauses/wipes if main viewer is also closed.
+    miniClose.onclick = e => {
+      e.stopPropagation();
+      hideMini();
+      const modal = document.getElementById('viewer-modal');
+      if (!modal.classList.contains('show')) {
+        // Main viewer is closed too — fully stop the session
+        audio.pause();
+        _activeAudioData = null; _activeAudioType = null; _activeAudioName = null; _activeAudio = null;
+        const body = document.getElementById('viewer-body');
+        body.innerHTML = ''; body.style.background = '#000'; body.style.cursor = '';
+        document.getElementById('viewer-toggle-bar').classList.remove('show');
+        // Fully reset pill state
+        miniPill.dataset.visible = 'false';
+        miniPill.style.transform = 'translateX(-50%) translateY(80px)';
+      }
+      // If main viewer IS open, leave audio alone — it keeps playing/paused as-is
+    };
+
+    // Sync mini pill state
+    const syncMini = () => {
+      const playing = !audio.paused;
+      miniPlayBtn.textContent = playing ? '⏸' : '▶';
+      miniDot.style.background = playing ? '#c8ff00' : '#333';
+      miniDot.style.boxShadow = playing ? '0 0 6px #c8ff00' : 'none';
+      miniTime.textContent = fmt(audio.currentTime) + ' / ' + fmt(audio.duration||0);
+    };
+    audio.addEventListener('play',  syncMini);
+    audio.addEventListener('pause', syncMini);
+    audio.addEventListener('timeupdate', syncMini);
+
+    // ── VIZ LOOP ──
+    function drawViz() {
+      rafId = requestAnimationFrame(drawViz);
+      const W = vizCanvas.offsetWidth, H = 32;
+      if (vizCanvas.width !== W) vizCanvas.width = W;
+      const ctx = vizCanvas.getContext('2d');
+      ctx.clearRect(0, 0, W, H);
+
+      if (!analyser || audio.paused) {
+        // idle flat line
+        ctx.strokeStyle = 'rgba(200,255,0,0.2)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
+        return;
+      }
+      const freqData = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(freqData);
+      const bars = 40, bw = Math.floor(W / (bars * 1.5)), gap = Math.floor(bw * 0.5);
+      const totalW = bars * (bw + gap); const sx = (W - totalW) / 2;
+      for (let i = 0; i < bars; i++) {
+        const val = freqData[Math.floor(i * freqData.length / bars)] / 255;
+        const bh = Math.max(2, val * H * 0.92);
+        const x = sx + i*(bw+gap), y = (H-bh)/2;
+        const grad = ctx.createLinearGradient(0,y,0,y+bh);
+        grad.addColorStop(0,'rgba(200,255,0,0.95)');
+        grad.addColorStop(1,'rgba(200,255,0,0.2)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(x, y, bw, bh);
+      }
+    }
+    drawViz();
+
+    // Cleanup on close
+    // Override close button — just hide the modal, never pause audio
+    const _audioCloseHandler = () => {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      document.removeEventListener('keydown', _keyHandler);
+      document.getElementById('viewer-overlay').classList.remove('show');
+      document.getElementById('viewer-modal').classList.remove('show');
+      // If mini pill is also hidden/gone, fully end the session
+      const pill = document.getElementById('audio-mini-pill');
+      const pillVisible = pill && pill.dataset.visible === 'true';
+      if (!pillVisible) {
+        audio.pause();
+        _activeAudioData = null; _activeAudioType = null; _activeAudioName = null; _activeAudio = null;
+        const body = document.getElementById('viewer-body');
+        body.innerHTML = ''; body.style.background = '#000'; body.style.cursor = '';
+        document.getElementById('viewer-toggle-bar').classList.remove('show');
+        if (pill) pill.remove();
+      }
+    };
+    document.getElementById('viewer-close').addEventListener('click', _audioCloseHandler);
 
   } else {
     body.innerHTML = `<div class="viewer-unsupported">
@@ -2904,7 +3424,6 @@ async function doImportFiles() {
 
   const loaded = [];
   for (const file of pendingImportFiles) {
-    if (file.size > 10 * 1024 * 1024) { showToast(`Skipped ${file.name} — over 10MB`); continue; }
     const data = await new Promise((res, rej) => {
       const reader = new FileReader();
       reader.onload = () => res(reader.result);
@@ -3008,9 +3527,7 @@ document.getElementById('single-import-next').addEventListener('click', async ()
   const tags = document.getElementById('single-import-tags').value
     .split(',').map(t => t.trim()).filter(Boolean);
 
-  if (file.size > 10 * 1024 * 1024) {
-    showToast(`Skipped ${file.name} — over 10MB`);
-  } else {
+  {
     const data = await new Promise((res, rej) => {
       const reader = new FileReader();
       reader.onload = () => res(reader.result);
@@ -3169,8 +3686,9 @@ document.getElementById('cat-dropdown').addEventListener('change', e => {
 function closeViewer() {
   document.getElementById('viewer-overlay').classList.remove('show');
   document.getElementById('viewer-modal').classList.remove('show');
+  // If active audio session, just hide modal — never destroy the player
+  if (_activeAudioData) return;
   document.getElementById('viewer-toggle-bar').classList.remove('show');
-  // Reset toggle button labels back to HTML defaults
   document.getElementById('viewer-code-btn').textContent = '⌨ Code';
   document.getElementById('viewer-preview-btn').textContent = '👁 Preview';
   _viewerHtmlSource = null;
@@ -3211,10 +3729,6 @@ document.getElementById('attach-file-input').addEventListener('change', async (e
   const warn = document.getElementById('attach-warning');
   warn.textContent = '';
   for (const file of files) {
-    if (file.size > 10 * 1024 * 1024) {
-      warn.textContent = `⚠ "${file.name}" is over 10MB and was skipped.`;
-      continue;
-    }
     if (file.size > 5 * 1024 * 1024) {
       warn.textContent = `⚠ Large file (${formatBytes(file.size)}) — export JSON may be slow.`;
     }
